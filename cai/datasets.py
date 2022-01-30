@@ -1,4 +1,4 @@
-"""K-CAI dataset functions.
+"""K-CAI data set functions.
 """
 import numpy as np
 import cv2
@@ -7,13 +7,13 @@ from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.datasets import cifar10,  fashion_mnist,  mnist
 import cai.util
 import os
+import json
 import urllib.request
 import scipy.io
 import zipfile
 import requests
 import sklearn.utils
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
 from skimage import color as skimage_color
 import skimage.filters
 import gc
@@ -443,60 +443,20 @@ def save_dataset_in_format(aImages, aClasses, dest_folder_name='img', format='.p
         cv2.imwrite(class_folder+'/img_'+str(img_cnt)+'.png',img)
 
 def fix_bad_tfkeras_channel_order(aImages):
-    """Fixes bad channel order from API loading."""
+    """Fixes bad channel order from API loading"""
     local_x = np.zeros(shape=(aImages.shape[0], aImages.shape[1], aImages.shape[2], aImages.shape[3]))
     local_x[:, :, :, 0] = aImages[:, :, :, 2]
     local_x[:, :, :, 1] = aImages[:, :, :, 1]
     local_x[:, :, :, 2] = aImages[:, :, :, 0]
     return local_x
 
-def fix_img_bad_tfkeras_channel_order(aImages):
-    """Fixes image bad channel order from API loading."""
-    local_x = np.zeros(shape=(aImages.shape[0], aImages.shape[1], aImages.shape[2]))
-    local_x[ :, :, 0] = aImages[ :, :, 2]
-    local_x[ :, :, 1] = aImages[ :, :, 1]
-    local_x[ :, :, 2] = aImages[ :, :, 0]
-    return local_x
-
-def save_tfds_in_format(p_tfds, dest_folder_name='img', format='.png'):
-  """
-  Saves a tensorflow dataset as image files. Classes are folders.
-  # Arguments
-    p_tfds: tensorflow dataset.
-    dest_folder_name: destination folder name.
-    format: image format as a file extension.
-  """
-  if not os.path.isdir(dest_folder_name):
-    os.mkdir(dest_folder_name)
-  cnt = 0;
-  for x in p_tfds.as_numpy_iterator():
-    #print(x["id"])
-    #print(x["image"].shape)
-    #print(x["label"])
-    class_idx = str(x["label"])
-    sample_idx = str(cnt)
-    img = fix_img_bad_tfkeras_channel_order(x["image"])
-    class_folder = dest_folder_name + '/class_' + class_idx
-    if not os.path.isdir(class_folder):
-       os.mkdir(class_folder)
-    cv2.imwrite(class_folder+'/img_'+sample_idx+format,img)
-    cnt = cnt + 1
-
 def save_dataset_as_png(aImages, aClasses, dest_folder_name='img'):
-    """Saves a dataset loaded with load_dataset into disk with png format."""
+    """Saves a dataset loaded with load_dataset into disk with png format"""
     save_dataset_in_format(aImages, aClasses, dest_folder_name=dest_folder_name, format='.png')
 
 def save_dataset_as_jpg(aImages, aClasses, dest_folder_name='img'):
-    """Saves a dataset loaded with load_dataset into disk with png format."""
+    """Saves a dataset loaded with load_dataset into disk with png format"""
     save_dataset_in_format(aImages, aClasses, dest_folder_name=dest_folder_name, format='.jpg')
-
-def save_tfds_as_png(p_tfds, dest_folder_name='img'):
-    """Saves a tensorflow dataset as png images. Classes are folders."""
-    save_tfds_in_format(p_tfds, dest_folder_name=dest_folder_name, format='.png')
-
-def save_tfds_as_jpg(p_tfds, dest_folder_name='img'):
-    """Saves a tensorflow dataset as jpg images. Classes are folders."""
-    save_tfds_in_format(p_tfds, dest_folder_name=dest_folder_name, format='.jpg')
 
 def download_file(remote_url,  local_file):
     r = requests.get(remote_url, stream = True) 
@@ -850,6 +810,7 @@ def add_padding_to_make_img_array_squared(img):
     pady = (maxsize - sizey) // 2
     return np.pad(img, pad_width=((padx,padx),(pady,pady),(0,0)))
 
+
 def load_images_from_files(file_names, target_size=(224,224), dtype='float32', smart_resize=False, lab=False, rescale=False, bipolar=False):
     """Creates an array with images from an array with file names.
     # Arguments
@@ -875,12 +836,14 @@ def load_images_from_files(file_names, target_size=(224,224), dtype='float32', s
             else:
                 img /= 255
         
-    x=[]
+    x = []
     cnt = 0
     for file_name in file_names:
+      # file_num = file_name.split('/')[-1]
+      
       cnt = cnt + 1
       if (cnt % 1000 == 0):
-          gc.collect()
+          gc.collect() #메모리 관리
       if (smart_resize):
         img = load_img(file_name)
         img = img_to_array(img, dtype='float32')
@@ -901,14 +864,25 @@ def load_images_from_files(file_names, target_size=(224,224), dtype='float32', s
         if(rescale):
             local_rescale(img,  lab)
       x.append(img)
+
+      # json_path = f'{file_name}/{file_num}.json'
+      # with open(json_path, 'r') as f:
+      #   json_file = json.load(f)
+    
+      # crop = json_file['annotations']['crop']
+      # disease = json_file['annotations']['disease']
+      # risk = json_file['annotations']['risk']
+      # y.append(f'{crop}_{disease}_{risk}')
+
     return np.array(x, dtype=dtype)
 
+# [2022.01.30] Modify for newdatasets 
 def load_images_from_folders(seed=None, root_dir=None, lab=False, 
   verbose=True, bipolar=False, base_model_name='plant_leaf',
   training_size=0.6, validation_size=0.2, test_size=0.2,
   target_size=(224,224), 
   has_training=True, has_validation=True, has_testing=True, 
-  smart_resize=False):
+  smart_resize=False, label_encoder = None):
   if root_dir is None:
     print("No root dir at load_images_from_folders")
     return
@@ -916,10 +890,7 @@ def load_images_from_folders(seed=None, root_dir=None, lab=False,
   if seed is not None:
     random.seed(seed)
   
-  classes = os.listdir(root_dir)
-  classes = sorted(classes)
-
-  classes_num = len(classes)
+  classes_num = len(label_encoder)
   if (verbose):
     print ("Loading ", classes_num, " classes.")
 
@@ -931,25 +902,44 @@ def load_images_from_folders(seed=None, root_dir=None, lab=False,
   val_x,val_y = [],[]
   test_x,test_y =[],[]
 
-  #read path and categorize to three groups: training, validation and testing. 
-  for i,_class in enumerate(classes):
-      paths = glob.glob(os.path.join(root_dir,_class,"*"))
-      paths = [n for n in paths if n.lower().endswith(".png") or n.lower().endswith(".jpg") or n.lower().endswith(".jpeg")]
-      random.shuffle(paths)
-      cat_total = len(paths)
-      if (training_size > 0):
-        train_path.extend(paths[:int(cat_total*training_size)])
-        train_y.extend([i]*int(cat_total*training_size))
-      if (validation_size > 0):
-        val_path.extend(paths[int(cat_total*training_size):int(cat_total*(training_size+validation_size))])
-        val_y.extend([i]*len(paths[int(cat_total*training_size):int(cat_total*(training_size+validation_size))]))
-      if (test_size > 0):
-          if (training_size+validation_size+test_size>=1):
-            test_path.extend(paths[int(cat_total*(training_size+validation_size)):])
-            test_y.extend([i]*len(paths[int(cat_total*(training_size+validation_size)):]))
-          else:
-            test_path.extend(paths[int(cat_total*(training_size+validation_size)):int(cat_total*(training_size+validation_size+test_size))])
-            test_y.extend([i]*len(paths[int(cat_total*(training_size+validation_size)):int(cat_total*(training_size+validation_size+test_size))]))
+  train_files = os.listdir(f'{root_dir}train/')
+  print(train_files)
+
+  train_jpg_path_s = []
+  train_val_y_list = []
+
+  for train_file in train_files[:]:
+    # train jpg paths
+    train_jpg_path_s.append(f'{root_dir}train/{train_file}/{train_file}.jpg')
+
+    # train json 
+    json_path = f'{root_dir}train/{train_file}/{train_file}.json'
+    with open(json_path, 'r') as f:
+      json_data = json.load(f)
+    crop = str(json_data['annotations']['crop'])
+    disease = str(json_data['annotations']['disease'])
+    risk = str(json_data['annotations']['risk'])
+    train_val_y_list.append(f'{crop}_{disease}_{risk}')
+  
+  train_path = train_jpg_path_s[0:int(len(train_jpg_path_s)*training_size)]
+  val_path = train_jpg_path_s[int(len(train_jpg_path_s)*training_size):]
+  train_y_list = train_val_y_list[0:int(len(train_jpg_path_s)*training_size)]
+  val_y_list = train_val_y_list[int(len(train_jpg_path_s)*training_size):]
+
+  for x in train_y_list:
+    train_y.append(label_encoder[x])
+  for y in val_y_list:
+    val_y.append(label_encoder[y])
+  print(train_y)
+  print(val_y)
+    
+
+  test_files = os.listdir(f'{root_dir}test/')
+  print(test_files)
+
+  for test_file in test_files[:]:
+    # train jpg paths
+    test_path.append(f'{root_dir}test/{test_file}/{test_file}.jpg')
 
   if (verbose and smart_resize):
       print ("smart resize is enabled.")
@@ -1003,84 +993,8 @@ def load_images_from_folders(seed=None, root_dir=None, lab=False,
   train_y = keras.utils.to_categorical(train_y, classes_num)
   val_y = keras.utils.to_categorical(val_y, classes_num)
   test_y = keras.utils.to_categorical(test_y, classes_num)
+
   if (verbose):
     print("Loaded.")
 
-  return train_x,val_x,test_x,train_y,val_y,test_y,class_weight,classes
-
-def print_classification_report(pred_y, test_y):
-  pred_classes_y = np.array(list(np.argmax(pred_y, axis=1)))
-  test_classes_y = np.array(list(np.argmax(test_y, axis=1)))
-  # print("Predicted classes shape:",pred_classes_y.shape)
-  # print("Test classes shape:",test_classes_y.shape)
-  report = classification_report(test_classes_y, pred_classes_y, digits=4)
-  print(report)
-
-def rgb_to_black_white_a(test_x):
-  bw_test = np.copy(test_x)
-  bw_test[ :, :, :, 0] = test_x[ :, :, :, 1] + test_x[ :, :, :, 2]
-  bw_test[ :, :, :, 0] /= 3
-  bw_test[ :, :, :, 1] = bw_test[ :, :, :, 0]
-  bw_test[ :, :, :, 2] = bw_test[ :, :, :, 0]
-  return bw_test
-
-def test_flips_on_model(test_x, test_y, model, has_flip_x=True, has_flip_y=True, has_bw=True, center_crop=0.0):
-  print("Test Original")
-  pred_y = model.predict(test_x)
-  print_classification_report(pred_y, test_y)
-
-  if (has_flip_x):
-    print("Test Flip X")
-    test_x_flip_x = np.flip(test_x, 2)
-    pred_y_fx = model.predict(test_x_flip_x)
-    print_classification_report(pred_y_fx, test_y)
-
-    print("Test Original + Flip X")
-    print_classification_report(pred_y + pred_y_fx, test_y)
-
-  if (has_flip_y):
-    print("Test Flip Y")
-    test_x_flip_y = np.flip(test_x, 1)
-    pred_y_fy = model.predict(test_x_flip_y)
-    print_classification_report(pred_y_fy, test_y)
-
-    print("Test Original + Flip Y")
-    print_classification_report(pred_y + pred_y_fy, test_y)
-
-  if (has_flip_x and has_flip_y):
-    print("Test Original + Flip X + Flip Y")
-    print_classification_report(pred_y + pred_y_fx + pred_y_fy, test_y)
-    
-  if (center_crop > 0):
-    print("Cropped and Resized")
-    size_x = test_x.shape[2]
-    size_y = test_x.shape[1]
-    center_crop_px = int( (size_x * (center_crop))/2 )
-    center_crop_py = int( (size_y * (center_crop))/2 )
-    cropped_test_x = test_x[ :, center_crop_py: size_y-center_crop_py, center_crop_px:size_x-center_crop_px, :]
-    print("Cropped shape:", cropped_test_x.shape)
-    crop_resized = cv2_resize_a(cropped_test_x, target_size=(size_y, size_x))
-    pred_y_cr = model.predict(crop_resized)
-    print_classification_report(pred_y_cr, test_y)
-    print("Original + Cropped Resized")
-    print_classification_report(pred_y + pred_y_cr, test_y)
-    if (has_flip_x):
-        print("Original + Flip X + Cropped Resized")
-        print_classification_report(pred_y + pred_y_fx + pred_y_cr, test_y)
-
-  if (has_bw):
-    print("Test Black and White")
-    bw_test = rgb_to_black_white_a(test_x)
-    pred_y_bw = model.predict(bw_test)
-    print_classification_report(pred_y_bw, test_y)
-
-    print("Test Original + Black and White")
-    print_classification_report(pred_y + pred_y_bw, test_y)
-
-  if (has_flip_x and has_flip_y and has_bw):
-    print("Test Original + Flip X + Flip Y + BW")
-    print_classification_report(pred_y + pred_y_fx + pred_y_fy + pred_y_bw, test_y)
-
-def test_flips_on_saved_model(test_x, test_y, model_file_name, has_flip_x=True, has_flip_y=True, has_bw=True, center_crop=0.0):
-  model = cai.models.load_kereas_model(model_file_name)
-  test_flips_on_model(test_x=test_x, test_y=test_y, model=model, has_flip_x=has_flip_x, has_flip_y=has_flip_y, has_bw=has_bw, center_crop=center_crop)
+  return train_x,val_x,test_x,train_y,val_y,test_y,class_weight
